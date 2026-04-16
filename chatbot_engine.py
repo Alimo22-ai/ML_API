@@ -4,7 +4,6 @@ import re
 from typing import Any, Dict, List, Optional
 
 import requests
-import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
