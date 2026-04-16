@@ -1,10 +1,7 @@
-
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional
-
-import os
-from typing import Dict, Any
 
 import requests
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -45,9 +42,40 @@ def recipe_has_allergy_conflict(recipe: Dict[str, Any], allergies: List[str]) ->
     ingredients_text = " ".join(recipe.get("ingredients", [])).lower()
 
     allergy_keywords = {
-        "nuts": ["nut", "almond", "walnut", "cashew", "peanut", "pecan", "pistachio", "hazelnut"],
-        "lactose": ["milk", "cheese", "yogurt", "cream", "butter", "dairy", "whey", "feta", "parmesan", "greek yogurt"],
-        "gluten": ["wheat", "bread", "pasta", "flour", "barley", "rye", "bun", "wrap", "granola", "croutons"],
+        "nuts": [
+            "nut",
+            "almond",
+            "walnut",
+            "cashew",
+            "peanut",
+            "pecan",
+            "pistachio",
+            "hazelnut",
+        ],
+        "lactose": [
+            "milk",
+            "cheese",
+            "yogurt",
+            "cream",
+            "butter",
+            "dairy",
+            "whey",
+            "feta",
+            "parmesan",
+            "greek yogurt",
+        ],
+        "gluten": [
+            "wheat",
+            "bread",
+            "pasta",
+            "flour",
+            "barley",
+            "rye",
+            "bun",
+            "wrap",
+            "granola",
+            "croutons",
+        ],
         "eggs": ["egg", "eggs", "omelette", "mayo", "mayonnaise"],
     }
 
@@ -80,13 +108,17 @@ def recipe_matches_conditions(recipe: Dict[str, Any], health_conditions: List[st
 
 
 class FoodChatbot:
-    def __init__(self, foods_data: List[Dict[str, Any]], recommendation_engine=None):
+    def __init__(
+        self,
+        foods_data: List[Dict[str, Any]],
+        recommendation_engine: Optional[Any] = None,
+    ):
         self.foods = foods_data
         self.engine = recommendation_engine
         self._build_search_index()
         self._build_intent_patterns()
 
-    def _build_search_index(self):
+    def _build_search_index(self) -> None:
         docs = []
         for food in self.foods:
             doc_parts = [
@@ -100,6 +132,9 @@ class FoodChatbot:
             ]
             docs.append(" ".join(doc_parts).lower())
 
+        if not docs:
+            docs = ["healthy food"]
+
         self.vectorizer = TfidfVectorizer(
             max_features=1000,
             stop_words="english",
@@ -107,7 +142,7 @@ class FoodChatbot:
         )
         self.matrix = self.vectorizer.fit_transform(docs)
 
-    def _build_intent_patterns(self):
+    def _build_intent_patterns(self) -> None:
         self.intents = {
             "greeting": {
                 "patterns": [r"\b(hi|hello|hey)\b", r"(مرحبا|اهلا|ازيك|ازاي|اه)"],
@@ -132,7 +167,7 @@ class FoodChatbot:
                     return intent_name, match
         return "unknown", None
 
-    def _handle_greeting(self, msg, match):
+    def _handle_greeting(self, msg: str, match: Any) -> str:
         return (
             "أهلاً بيك 👋\n\n"
             "أنا شات بوت التغذية الخاص بمشروعك.\n"
@@ -144,10 +179,10 @@ class FoodChatbot:
             "- وجبات قليلة الكارب"
         )
 
-    def _handle_thanks(self, msg, match):
+    def _handle_thanks(self, msg: str, match: Any) -> str:
         return "العفو 😊"
 
-    def _handle_help(self, msg, match):
+    def _handle_help(self, msg: str, match: Any) -> str:
         return (
             "أقدر أساعدك في:\n"
             "- البحث المباشر في recipes\n"
@@ -168,7 +203,12 @@ class FoodChatbot:
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_n]
 
-    def _dataset_first_candidates(self, user_msg: str, user_profile: Optional[Dict[str, Any]] = None, top_n: int = 8):
+    def _dataset_first_candidates(
+        self,
+        user_msg: str,
+        user_profile: Optional[Dict[str, Any]] = None,
+        top_n: int = 8,
+    ) -> List[Dict[str, Any]]:
         matches = [food for food, _ in self._search_foods_by_text(user_msg, top_n=top_n)]
 
         if not matches:
@@ -177,7 +217,10 @@ class FoodChatbot:
         if user_profile:
             filtered = []
             allergies = user_profile.get("allergies", [])
-            diet_type = user_profile.get("diet_type", "balanced")
+            diet_type = user_profile.get("diet_type") or user_profile.get(
+                "dietary_preference",
+                "balanced",
+            )
             health_conditions = user_profile.get("health_conditions", [])
 
             for food in matches:
@@ -194,23 +237,33 @@ class FoodChatbot:
 
         return matches[:top_n]
 
-    def _build_context(self, user_msg: str, user_profile: Optional[Dict[str, Any]] = None):
-        matches = self._dataset_first_candidates(user_msg, user_profile=user_profile, top_n=8)
+    def _build_context(
+        self,
+        user_msg: str,
+        user_profile: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        matches = self._dataset_first_candidates(
+            user_msg,
+            user_profile=user_profile,
+            top_n=8,
+        )
 
         foods_context = []
         for food in matches:
-            foods_context.append({
-                "name": food.get("name"),
-                "meal_type": food.get("meal_type"),
-                "calories": food.get("calories"),
-                "protein": food.get("protein"),
-                "carbs": food.get("carbs"),
-                "fats": food.get("fats"),
-                "diet": food.get("diet", []),
-                "diseases": food.get("diseases", []),
-                "allergy": food.get("allergy", []),
-                "ingredients": food.get("ingredients", [])[:10],
-            })
+            foods_context.append(
+                {
+                    "name": food.get("name"),
+                    "meal_type": food.get("meal_type"),
+                    "calories": food.get("calories"),
+                    "protein": food.get("protein"),
+                    "carbs": food.get("carbs"),
+                    "fats": food.get("fats"),
+                    "diet": food.get("diet", []),
+                    "diseases": food.get("diseases", []),
+                    "allergy": food.get("allergy", []),
+                    "ingredients": food.get("ingredients", [])[:10],
+                }
+            )
 
         return {
             "user_profile": user_profile or {},
@@ -225,16 +278,34 @@ class FoodChatbot:
         if not foods:
             return "مش لاقي نتائج مناسبة في الداتا الحالية."
 
-        if "اعلى بروتين" in question or "أعلى بروتين" in question or "highest protein" in question:
-            best = max(foods, key=lambda x: float(x.get("protein", 0)))
-            return f"أعلى وجبة بروتين من الداتا هي **{best['name']}** وفيها **{best['protein']}g protein**."
+        if (
+            "اعلى بروتين" in question
+            or "أعلى بروتين" in question
+            or "highest protein" in question
+        ):
+            best = max(foods, key=lambda x: float(x.get("protein", 0) or 0))
+            return (
+                f"أعلى وجبة بروتين من الداتا هي **{best['name']}** "
+                f"وفيها **{best['protein']}g protein**."
+            )
 
-        if "اقل سعرات" in question or "أقل سعرات" in question or "lowest calories" in question:
-            best = min(foods, key=lambda x: float(x.get("calories", 0)))
-            return f"أقل وجبة سعرات من الداتا هي **{best['name']}** وفيها **{best['calories']} kcal**."
+        if (
+            "اقل سعرات" in question
+            or "أقل سعرات" in question
+            or "lowest calories" in question
+        ):
+            best = min(foods, key=lambda x: float(x.get("calories", 0) or 0))
+            return (
+                f"أقل وجبة سعرات من الداتا هي **{best['name']}** "
+                f"وفيها **{best['calories']} kcal**."
+            )
 
         if "سكر" in question or "diabet" in question:
-            diabetic = [f for f in foods if "diabetes" in [str(x).lower() for x in f.get("diseases", [])]]
+            diabetic = [
+                f
+                for f in foods
+                if "diabetes" in [str(x).lower() for x in f.get("diseases", [])]
+            ]
             if diabetic:
                 lines = [
                     f"- **{f['name']}** — {f['calories']} kcal, {f['protein']}g protein"
@@ -255,13 +326,11 @@ class FoodChatbot:
         ]
         return "دي أقرب وجبات من الداتا لسؤالك:\n\n" + "\n".join(lines)
 
-# السطر 258: تعريف الدالة
-def _call_openrouter_with_context(self, context: Dict[str, Any]) -> str:
-    # السطر 260: تأكد إن فيه مسافة (4 مسافات) قبل api_key
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    def _call_openrouter_with_context(self, context: Dict[str, Any]) -> str:
+        api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
-    if not api_key:
-        return self._local_fallback_answer(context)
+        if not api_key:
+            return self._local_fallback_answer(context)
 
         system_prompt = """
 You are a nutrition chatbot for a healthy meal recommendation project.
@@ -298,15 +367,22 @@ Answer only from this context.
                 },
                 timeout=60,
             )
+
             if response.status_code == 200:
                 data = response.json()
                 return data["choices"][0]["message"]["content"]
+
         except Exception:
             pass
 
         return self._local_fallback_answer(context)
 
-    def respond(self, user_msg: str, user_profile: Optional[Dict[str, Any]] = None, recommendations: Optional[List[Dict[str, Any]]] = None) -> str:
+    def respond(
+        self,
+        user_msg: str,
+        user_profile: Optional[Dict[str, Any]] = None,
+        recommendations: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
         msg = user_msg.strip()
         if not msg:
             return "اكتب سؤالك."
