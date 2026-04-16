@@ -3,6 +3,9 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
+import os
+from typing import Dict, Any
+
 import requests
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -253,10 +256,11 @@ class FoodChatbot:
         return "دي أقرب وجبات من الداتا لسؤالك:\n\n" + "\n".join(lines)
 
     def _call_openrouter_with_context(self, context: Dict[str, Any]) -> str:
-        api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+    # استخدام os.environ بدلاً من st.secrets
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
-        if not api_key:
-            return self._local_fallback_answer(context)
+    if not api_key:
+        return self._local_fallback_answer(context)
 
         system_prompt = """
 You are a nutrition chatbot for a healthy meal recommendation project.
