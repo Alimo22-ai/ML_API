@@ -5,12 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from meal_model import (
-    MealRecommendationSystem,
-    RecipeRecommender,
-    UserNutritionModel,
-    UserProfile,
-)
+from meal_model import MealRecommendationSystem, UserNutritionModel, UserProfile
 from chatbot_engine import FoodChatbot
 
 
@@ -18,8 +13,10 @@ APP_TITLE = "Healthy Food AI API"
 APP_VERSION = "1.0.0"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "nutrition_model.joblib")
-RECIPES_PATH = os.path.join(BASE_DIR, "recips.json")
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+
+MODEL_PATH = os.path.join(PROJECT_ROOT, "nutrition_model.joblib")
+RECIPES_PATH = os.path.join(PROJECT_ROOT, "recips.json")
 
 
 class UserProfileRequest(BaseModel):
@@ -70,7 +67,7 @@ def load_recipes(recipes_path: str) -> List[Dict[str, Any]]:
     if not os.path.exists(recipes_path):
         raise FileNotFoundError(
             f"Recipes file not found: {recipes_path}. "
-            "Make sure recips.json exists next to api.py."
+            "Make sure recips.json exists in the project root."
         )
 
     with open(recipes_path, "r", encoding="utf-8") as f:
@@ -97,29 +94,51 @@ def create_app() -> FastAPI:
         "recommender_system": None,
         "chatbot": None,
         "recipes": [],
+        "startup_error": None,
     }
 
     @app.on_event("startup")
     def startup_event() -> None:
+        state["startup_error"] = None
+        state["recipes"] = []
+        state["chatbot"] = None
+        state["recommender_system"] = None
+        state["model"] = None
+
         try:
             recipes = load_recipes(RECIPES_PATH)
             state["recipes"] = recipes
             state["chatbot"] = FoodChatbot(foods_data=recipes)
 
             if os.path.exists(MODEL_PATH):
-                state["recommender_system"] = MealRecommendationSystem(
-                    model_path=MODEL_PATH,
-                    recipes_path=RECIPES_PATH,
-                )
-                model = UserNutritionModel()
-                model.load(MODEL_PATH)
-                state["model"] = model
+                try:
+                    state["recommender_system"] = MealRecommendationSystem(
+                        model_path=MODEL_PATH,
+                        recipes_path=RECIPES_PATH,
+                    )
+                except Exception as exc:
+                    state["recommender_system"] = None
+                    state["startup_error"] = f"Failed to initialize recommendation system: {exc}"
+
+                try:
+                    model = UserNutritionModel()
+                    model.load(MODEL_PATH)
+                    state["model"] = model
+                except Exception as exc:
+                    state["model"] = None
+                    if state["startup_error"]:
+                        state["startup_error"] += f" | Failed to load model: {exc}"
+                    else:
+                        state["startup_error"] = f"Failed to load model: {exc}"
             else:
-                state["recommender_system"] = None
-                state["model"] = None
+                state["startup_error"] = f"Model file not found: {MODEL_PATH}"
 
         except Exception as exc:
-            raise RuntimeError(f"API startup failed: {exc}") from exc
+            state["recipes"] = []
+            state["chatbot"] = None
+            state["recommender_system"] = None
+            state["model"] = None
+            state["startup_error"] = f"Startup error: {exc}"
 
     @app.get("/")
     def root() -> Dict[str, Any]:
@@ -128,6 +147,7 @@ def create_app() -> FastAPI:
             "version": APP_VERSION,
             "model_loaded": state["model"] is not None,
             "recipes_loaded": len(state["recipes"]),
+            "startup_error": state.get("startup_error"),
         }
 
     @app.get("/health")
@@ -138,6 +158,9 @@ def create_app() -> FastAPI:
             "recipes_loaded": len(state["recipes"]),
             "model_path": MODEL_PATH,
             "recipes_path": RECIPES_PATH,
+            "model_exists": os.path.exists(MODEL_PATH),
+            "recipes_exists": os.path.exists(RECIPES_PATH),
+            "startup_error": state.get("startup_error"),
         }
 
     @app.post("/predict-targets")
@@ -145,13 +168,19 @@ def create_app() -> FastAPI:
         if state["model"] is None:
             raise HTTPException(
                 status_code=500,
-                detail="Model is not loaded. Make sure nutrition_model.joblib exists.",
+                detail={
+                    "message": "Model is not loaded.",
+                    "startup_error": state.get("startup_error"),
+                    "model_path": MODEL_PATH,
+                    "model_exists": os.path.exists(MODEL_PATH),
+                },
             )
 
         try:
             user = payload.to_user_profile()
             daily_targets = state["model"].predict_daily_targets(user)
             meals = max(user.meals_per_day, 1)
+
             per_meal_target = {
                 "calories": round(daily_targets["calories"] / meals, 1),
                 "protein": round(daily_targets["protein"] / meals, 1),
@@ -171,7 +200,14 @@ def create_app() -> FastAPI:
         if state["recommender_system"] is None:
             raise HTTPException(
                 status_code=500,
-                detail="Recommendation system is not loaded. Make sure nutrition_model.joblib and recips.json exist.",
+                detail={
+                    "message": "Recommendation system is not loaded.",
+                    "startup_error": state.get("startup_error"),
+                    "model_path": MODEL_PATH,
+                    "recipes_path": RECIPES_PATH,
+                    "model_exists": os.path.exists(MODEL_PATH),
+                    "recipes_exists": os.path.exists(RECIPES_PATH),
+                },
             )
 
         try:
@@ -184,7 +220,15 @@ def create_app() -> FastAPI:
     @app.post("/chat")
     def chat(payload: ChatRequest) -> Dict[str, Any]:
         if state["chatbot"] is None:
-            raise HTTPException(status_code=500, detail="Chatbot is not initialized.")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": "Chatbot is not initialized.",
+                    "startup_error": state.get("startup_error"),
+                    "recipes_path": RECIPES_PATH,
+                    "recipes_exists": os.path.exists(RECIPES_PATH),
+                },
+            )
 
         try:
             user_profile = payload.user_profile.to_user_profile() if payload.user_profile else None
@@ -202,6 +246,7 @@ def create_app() -> FastAPI:
         return {
             "count": len(state["recipes"]),
             "items": state["recipes"][:limit],
+            "startup_error": state.get("startup_error"),
         }
 
     return app
@@ -213,4 +258,4 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("api.index:app", host="0.0.0.0", port=8000, reload=True)
